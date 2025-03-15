@@ -12,6 +12,71 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type diffLineMapping struct {
+	lineBefore  int
+	countBefore int
+	lineAfter   int
+	countAfter  int
+}
+
+func (dlm diffLineMapping) getBeforeLines() (int, int) {
+	var beforeLineA int
+	if dlm.countBefore == 0 {
+		beforeLineA = dlm.lineBefore
+	} else {
+		beforeLineA = dlm.lineBefore - 1
+	}
+	beforeLineB := beforeLineA + dlm.countBefore + 1
+	return beforeLineA, beforeLineB
+}
+
+func (dlm diffLineMapping) getAfterLines() (int, int) {
+	var afterLineA int
+	if dlm.countAfter == 0 {
+		afterLineA = dlm.lineAfter
+	} else {
+		afterLineA = dlm.lineAfter - 1
+	}
+	afterLineB := afterLineA + dlm.countAfter + 1
+	return afterLineA, afterLineB
+}
+
+type fileDiffMetadata struct {
+	fileName  string
+	diffLines []diffLineMapping
+}
+
+func (fdm fileDiffMetadata) getLineAfterForLineBefore(lineNo int) (int, error) {
+	// The diffLineMapping is the 1 less than the lower_bound of condition lineNo < diffLine.lineBefore
+	// Eg. for following conditions,
+	// 	 lineNo = 86
+	//   diffLines = ["@@ -10,0 +11 @@", "@@ -32,0 +34,3 @@", "@@ -92,0 +97,2 @@"]
+	// The lower_bound for the condition 86 < lineBefore = "@@ -92,0 +97,2 @@"
+	// The value should be,
+	//   validDiffLine = "@@ -32,0 +34,3 @@"
+	//
+	var validDiffLine diffLineMapping
+	for _, dlm := range fdm.diffLines {
+		beforeLineA, beforeLineB := dlm.getBeforeLines()
+
+		if lineNo > beforeLineA && lineNo < beforeLineB {
+			return -1, errors.Errorf("lineNo: %d cannot be mapped correctly as it is modified", lineNo)
+		}
+		if lineNo >= beforeLineB {
+			validDiffLine = dlm
+		}
+	}
+
+	if validDiffLine == (diffLineMapping{}) {
+		return lineNo, nil
+	}
+
+	_, beforeLineB := validDiffLine.getBeforeLines()
+	_, afterLineB := validDiffLine.getAfterLines()
+	mappedLineNo := afterLineB + (lineNo - beforeLineB)
+	return mappedLineNo, nil
+}
+
 type PrPatchGenerator struct {
 	baseBranch      string
 	headBranch      string
@@ -19,6 +84,7 @@ type PrPatchGenerator struct {
 	lastMergeCommit string
 	mergeBaseCommit string
 	prFiles         []string
+	prFilesDiff     []fileDiffMetadata
 }
 
 func (p PrPatchGenerator) String() string {
@@ -98,6 +164,7 @@ func getFileMappingFromDiff() error {
 		}
 
 		println("File: " + file)
+		fdm := fileDiffMetadata{fileName: file}
 		for _, line := range strings.Split(diff, "\n") {
 			if strings.Contains(line, "@@") {
 				matches := lineNumberRegex.FindStringSubmatch(line)
@@ -123,9 +190,16 @@ func getFileMappingFromDiff() error {
 
 					println(fmt.Sprintf("Line before: %d, Count before: %d, Line after: %d, Count after: %d",
 						result["lineBefore"], result["countBefore"], result["lineAfter"], result["countAfter"]))
+					fdm.diffLines = append(fdm.diffLines, diffLineMapping{
+						lineBefore:  result["lineBefore"],
+						countBefore: result["countBefore"],
+						lineAfter:   result["lineAfter"],
+						countAfter:  result["countAfter"],
+					})
 				}
 			}
 		}
+		prPatchOptions.prFilesDiff = append(prPatchOptions.prFilesDiff, fdm)
 	}
 	return nil
 }
@@ -142,6 +216,14 @@ var prPatchCoverageCmd = &cobra.Command{
 		if err := getFileMappingFromDiff(); err != nil {
 			return err
 		}
+
+		lineNo := 0
+		fmt.Sscanf(args[0], "%d", &lineNo)
+		resultLineNo, err := prPatchOptions.prFilesDiff[0].getLineAfterForLineBefore(lineNo)
+		if err != nil {
+			return err
+		}
+		println("Diff mapping: %d", resultLineNo)
 
 		return nil
 	},
