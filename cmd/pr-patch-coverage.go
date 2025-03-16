@@ -17,32 +17,10 @@ import (
 const defaultPrPatchCoveragePath = "coverage/patch_coverage.json"
 
 type diffLineMapping struct {
-	lineBefore  int
-	countBefore int
-	lineAfter   int
-	countAfter  int
-}
-
-func (dlm diffLineMapping) getBeforeLines() (int, int) {
-	var beforeLineA int
-	if dlm.countBefore == 0 {
-		beforeLineA = dlm.lineBefore
-	} else {
-		beforeLineA = dlm.lineBefore - 1
-	}
-	beforeLineB := beforeLineA + dlm.countBefore + 1
-	return beforeLineA, beforeLineB
-}
-
-func (dlm diffLineMapping) getAfterLines() (int, int) {
-	var afterLineA int
-	if dlm.countAfter == 0 {
-		afterLineA = dlm.lineAfter
-	} else {
-		afterLineA = dlm.lineAfter - 1
-	}
-	afterLineB := afterLineA + dlm.countAfter + 1
-	return afterLineA, afterLineB
+	beforeLineA int
+	beforeLineB int
+	afterLineA  int
+	afterLineB  int
 }
 
 func getDiffLineMapping(fromString string) (diffLineMapping, error) {
@@ -71,11 +49,28 @@ func getDiffLineMapping(fromString string) (diffLineMapping, error) {
 
 		println(fmt.Sprintf("Line before: %d, Count before: %d, Line after: %d, Count after: %d",
 			result["lineBefore"], result["countBefore"], result["lineAfter"], result["countAfter"]))
+
+		var beforeLineA int
+		if result["countBefore"] == 0 {
+			beforeLineA = result["lineBefore"]
+		} else {
+			beforeLineA = result["lineBefore"] - 1
+		}
+		beforeLineB := beforeLineA + result["countBefore"] + 1
+
+		var afterLineA int
+		if result["countAfter"] == 0 {
+			afterLineA = result["lineAfter"]
+		} else {
+			afterLineA = result["lineAfter"] - 1
+		}
+		afterLineB := beforeLineA + result["countAfter"] + 1
+
 		dlm = diffLineMapping{
-			lineBefore:  result["lineBefore"],
-			countBefore: result["countBefore"],
-			lineAfter:   result["lineAfter"],
-			countAfter:  result["countAfter"],
+			beforeLineA: beforeLineA,
+			beforeLineB: beforeLineB,
+			afterLineA:  afterLineA,
+			afterLineB:  afterLineB,
 		}
 	} else {
 		err := errors.Errorf("Unable to get the line numbers for line: '%s'", fromString)
@@ -100,12 +95,10 @@ func (fdm fileDiffMetadata) getLineAfterForLineBefore(lineNo int) (int, error) {
 	//
 	var validDiffLine diffLineMapping
 	for _, dlm := range fdm.diffLines {
-		beforeLineA, beforeLineB := dlm.getBeforeLines()
-
-		if lineNo > beforeLineA && lineNo < beforeLineB {
+		if lineNo > dlm.beforeLineA && lineNo < dlm.beforeLineB {
 			return -1, errors.Errorf("lineNo: %d cannot be mapped correctly as it is modified", lineNo)
 		}
-		if lineNo >= beforeLineB {
+		if lineNo >= dlm.beforeLineB {
 			validDiffLine = dlm
 		}
 	}
@@ -114,9 +107,7 @@ func (fdm fileDiffMetadata) getLineAfterForLineBefore(lineNo int) (int, error) {
 		return lineNo, nil
 	}
 
-	_, beforeLineB := validDiffLine.getBeforeLines()
-	_, afterLineB := validDiffLine.getAfterLines()
-	mappedLineNo := afterLineB + (lineNo - beforeLineB)
+	mappedLineNo := validDiffLine.afterLineB + (lineNo - validDiffLine.beforeLineB)
 	return mappedLineNo, nil
 }
 
