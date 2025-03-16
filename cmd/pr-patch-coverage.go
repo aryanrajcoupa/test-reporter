@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,9 +9,12 @@ import (
 	"strings"
 
 	"github.com/codeclimate/test-reporter/env"
+	"github.com/codeclimate/test-reporter/formatters"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
+
+const defaultPrPatchCoveragePath = "coverage/patch_coverage.json"
 
 type diffLineMapping struct {
 	lineBefore  int
@@ -83,6 +87,7 @@ type PrPatchGenerator struct {
 	headTipCommit   string
 	lastMergeCommit string
 	mergeBaseCommit string
+	output          string
 	prFiles         []string
 	prFilesDiff     []fileDiffMetadata
 }
@@ -209,21 +214,41 @@ var prPatchCoverageCmd = &cobra.Command{
 	Short: "Generates patch coverage for PR. Needs to be run after format-coverage",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := updatePrPatchOptions(args); err != nil {
-			return err
+			return errors.WithStack(err)
 		}
 		println(prPatchOptions.String())
 
 		if err := getFileMappingFromDiff(); err != nil {
-			return err
+			return errors.WithStack(err)
 		}
 
-		lineNo := 0
-		fmt.Sscanf(args[0], "%d", &lineNo)
-		resultLineNo, err := prPatchOptions.prFilesDiff[0].getLineAfterForLineBefore(lineNo)
-		if err != nil {
-			return err
+		rep := formatters.Report{
+			SourceFiles: formatters.SourceFiles{},
 		}
-		println("Diff mapping: %d", resultLineNo)
+
+		f, err := os.Open(args[0])
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		err = json.NewDecoder(f).Decode(&rep)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		outRep := formatters.Report{
+			SourceFiles: formatters.SourceFiles{},
+		}
+
+		out, err := writer(prPatchOptions.output)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		err = outRep.Save(out)
+		if err != nil {
+			return errors.WithStack(err)
+		}
 
 		return nil
 	},
@@ -245,5 +270,6 @@ func init() {
 	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.headBranch, "head-branch", "", "the head branch of the PR")
 	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.headTipCommit, "head-tip-commit", "", "commit on tip of PR head branch")
 	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.lastMergeCommit, "last-merge-commit", "", "last merge commit on the head branch")
+	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.output, "output", defaultPrPatchCoveragePath, "output path")
 	RootCmd.AddCommand(prPatchCoverageCmd)
 }
