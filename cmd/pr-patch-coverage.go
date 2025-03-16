@@ -45,6 +45,45 @@ func (dlm diffLineMapping) getAfterLines() (int, int) {
 	return afterLineA, afterLineB
 }
 
+func getDiffLineMapping(fromString string) (diffLineMapping, error) {
+	lineNumberRegex := regexp.MustCompile(`@@ -(?P<lineBefore>\d+),?(?P<countBefore>\d+)? \+(?P<lineAfter>\d+),?(?P<countAfter>\d+)? @@`)
+	var dlm diffLineMapping
+	matches := lineNumberRegex.FindStringSubmatch(fromString)
+	if len(matches) >= 4 {
+		// Get names of the capturing groups
+		names := lineNumberRegex.SubexpNames()
+		println(fmt.Sprintf("Matches: %v, Names: %v", matches, names))
+		// Create a map of group names to their values
+		result := make(map[string]int)
+		for i, name := range names {
+			// names[i] is always an empty string from SubexpNames
+			if i != 0 && name != "" && i < len(matches) {
+				// Convert string to integer, default to 1 if empty
+				val := matches[i]
+				if val == "" {
+					val = "1"
+				}
+				num := 0
+				fmt.Sscanf(val, "%d", &num)
+				result[name] = num
+			}
+		}
+
+		println(fmt.Sprintf("Line before: %d, Count before: %d, Line after: %d, Count after: %d",
+			result["lineBefore"], result["countBefore"], result["lineAfter"], result["countAfter"]))
+		dlm = diffLineMapping{
+			lineBefore:  result["lineBefore"],
+			countBefore: result["countBefore"],
+			lineAfter:   result["lineAfter"],
+			countAfter:  result["countAfter"],
+		}
+	} else {
+		err := errors.Errorf("Unable to get the line numbers for line: '%s'", fromString)
+		return dlm, err
+	}
+	return dlm, nil
+}
+
 type fileDiffMetadata struct {
 	fileName  string
 	diffLines []diffLineMapping
@@ -118,7 +157,6 @@ var prPatchOptions = PrPatchGenerator{}
 
 func getFileMappingFromDiff() error {
 	headBranchOrigin := "origin/" + prPatchOptions.headBranch
-	lineNumberRegex := regexp.MustCompile(`@@ -(?P<lineBefore>\d+),?(?P<countBefore>\d+)? \+(?P<lineAfter>\d+),?(?P<countAfter>\d+)? @@`)
 
 	for _, file := range prPatchOptions.prFiles {
 		diff, err := loadFromGit("diff", "-U0", headBranchOrigin, "HEAD", "--", file)
@@ -130,35 +168,10 @@ func getFileMappingFromDiff() error {
 		fdm := fileDiffMetadata{fileName: file}
 		for _, line := range strings.Split(diff, "\n") {
 			if strings.Contains(line, "@@") {
-				matches := lineNumberRegex.FindStringSubmatch(line)
-				if len(matches) >= 4 {
-					// Get names of the capturing groups
-					names := lineNumberRegex.SubexpNames()
-					println(fmt.Sprintf("Matches: %v, Names: %v", matches, names))
-					// Create a map of group names to their values
-					result := make(map[string]int)
-					for i, name := range names {
-						// names[i] is always an empty string from SubexpNames
-						if i != 0 && name != "" && i < len(matches) {
-							// Convert string to integer, default to 1 if empty
-							val := matches[i]
-							if val == "" {
-								val = "1"
-							}
-							num := 0
-							fmt.Sscanf(val, "%d", &num)
-							result[name] = num
-						}
-					}
-
-					println(fmt.Sprintf("Line before: %d, Count before: %d, Line after: %d, Count after: %d",
-						result["lineBefore"], result["countBefore"], result["lineAfter"], result["countAfter"]))
-					fdm.diffLines = append(fdm.diffLines, diffLineMapping{
-						lineBefore:  result["lineBefore"],
-						countBefore: result["countBefore"],
-						lineAfter:   result["lineAfter"],
-						countAfter:  result["countAfter"],
-					})
+				if dlm, err := getDiffLineMapping(line); err == nil {
+					fdm.diffLines = append(fdm.diffLines, dlm)
+				} else {
+					return err
 				}
 			}
 		}
