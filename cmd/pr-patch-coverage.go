@@ -116,48 +116,6 @@ func (p PrPatchGenerator) String() string {
 
 var prPatchOptions = PrPatchGenerator{}
 
-func updatePrPatchOptions(args []string) error {
-	if prPatchOptions.baseBranch == "" {
-		return errors.New("base-branch is required")
-	}
-	if prPatchOptions.headBranch == "" {
-		e, err := env.New()
-		if err != nil {
-			return err
-		}
-		prPatchOptions.headBranch = e.Git.Branch
-	}
-	if prPatchOptions.headTipCommit == "" {
-		commit, err := loadFromGit("rev-parse", "origin/"+prPatchOptions.headBranch)
-		if err != nil {
-			return err
-		}
-		prPatchOptions.headTipCommit = commit
-	}
-	if prPatchOptions.lastMergeCommit == "" {
-		commit, err := loadFromGit("rev-parse", prPatchOptions.headBranch)
-		if err != nil {
-			return err
-		}
-		prPatchOptions.lastMergeCommit = commit
-	}
-	// Get the merge base commit
-	commit, err := loadFromGit("merge-base", prPatchOptions.baseBranch, prPatchOptions.headTipCommit)
-	if err != nil {
-		return err
-	}
-	prPatchOptions.mergeBaseCommit = commit
-
-	// Get the list of files changed in the PR
-	files, err := loadFromGit("diff", "--name-only", prPatchOptions.mergeBaseCommit, prPatchOptions.headTipCommit)
-	if err != nil {
-		return err
-	}
-	prPatchOptions.prFiles = strings.Split(files, "\n")
-
-	return nil
-}
-
 func getFileMappingFromDiff() error {
 	headBranchOrigin := "origin/" + prPatchOptions.headBranch
 	lineNumberRegex := regexp.MustCompile(`@@ -(?P<lineBefore>\d+),?(?P<countBefore>\d+)? \+(?P<lineAfter>\d+),?(?P<countAfter>\d+)? @@`)
@@ -209,16 +167,58 @@ func getFileMappingFromDiff() error {
 	return nil
 }
 
+func updatePrPatchOptions() error {
+	if prPatchOptions.baseBranch == "" {
+		return errors.New("base-branch is required")
+	}
+	if prPatchOptions.headBranch == "" {
+		e, err := env.New()
+		if err != nil {
+			return err
+		}
+		prPatchOptions.headBranch = e.Git.Branch
+	}
+	if prPatchOptions.headTipCommit == "" {
+		commit, err := loadFromGit("rev-parse", "origin/"+prPatchOptions.headBranch)
+		if err != nil {
+			return err
+		}
+		prPatchOptions.headTipCommit = commit
+	}
+	if prPatchOptions.lastMergeCommit == "" {
+		commit, err := loadFromGit("rev-parse", prPatchOptions.headBranch)
+		if err != nil {
+			return err
+		}
+		prPatchOptions.lastMergeCommit = commit
+	}
+	// Get the merge base commit
+	commit, err := loadFromGit("merge-base", prPatchOptions.baseBranch, prPatchOptions.headTipCommit)
+	if err != nil {
+		return err
+	}
+	prPatchOptions.mergeBaseCommit = commit
+
+	// Get the list of files changed in the PR
+	files, err := loadFromGit("diff", "--name-only", prPatchOptions.mergeBaseCommit, prPatchOptions.headTipCommit)
+	if err != nil {
+		return err
+	}
+	prPatchOptions.prFiles = strings.Split(files, "\n")
+	println(prPatchOptions.String())
+
+	if err := getFileMappingFromDiff(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 var prPatchCoverageCmd = &cobra.Command{
 	Use:   "pr-patch-coverage",
 	Short: "Generates patch coverage for PR. Needs to be run after format-coverage",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := updatePrPatchOptions(args); err != nil {
-			return errors.WithStack(err)
-		}
-		println(prPatchOptions.String())
-
-		if err := getFileMappingFromDiff(); err != nil {
+		if err := updatePrPatchOptions(); err != nil {
 			return errors.WithStack(err)
 		}
 
