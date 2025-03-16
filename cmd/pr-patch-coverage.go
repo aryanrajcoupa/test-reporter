@@ -111,15 +111,30 @@ func (fdm fileDiffMetadata) getLineAfterForLineBefore(lineNo int) (int, error) {
 	return mappedLineNo, nil
 }
 
+func getFileDiffMetadata(file string, fromDiffString string) (fileDiffMetadata, error) {
+	fdm := fileDiffMetadata{fileName: file}
+	for _, line := range strings.Split(fromDiffString, "\n") {
+		if strings.Contains(line, "@@") {
+			if dlm, err := getDiffLineMapping(line); err == nil {
+				fdm.diffLines = append(fdm.diffLines, dlm)
+			} else {
+				return fdm, err
+			}
+		}
+	}
+	return fdm, nil
+}
+
 type PrPatchGenerator struct {
-	baseBranch      string
-	headBranch      string
-	headTipCommit   string
-	lastMergeCommit string
-	mergeBaseCommit string
-	output          string
-	prFiles         []string
-	prFilesDiff     []fileDiffMetadata
+	baseBranch           string
+	headBranch           string
+	headTipCommit        string
+	lastMergeCommit      string
+	mergeBaseCommit      string
+	output               string
+	prFiles              []string
+	prFilesDiff          []fileDiffMetadata
+	prFilesDiffLastMerge []fileDiffMetadata
 }
 
 func (p PrPatchGenerator) String() string {
@@ -147,26 +162,31 @@ func (p PrPatchGenerator) String() string {
 var prPatchOptions = PrPatchGenerator{}
 
 func getFileMappingFromDiff() error {
-	headBranchOrigin := "origin/" + prPatchOptions.headBranch
-
 	for _, file := range prPatchOptions.prFiles {
-		diff, err := loadFromGit("diff", "-U0", headBranchOrigin, "HEAD", "--", file)
+		println("File: " + file)
+		// Generating file diff between the mergeBaseCommit and headTipCommit
+		diff, err := loadFromGit("diff", "-U0", prPatchOptions.mergeBaseCommit, prPatchOptions.headTipCommit, "--", file)
 		if err != nil {
 			return err
 		}
 
-		println("File: " + file)
-		fdm := fileDiffMetadata{fileName: file}
-		for _, line := range strings.Split(diff, "\n") {
-			if strings.Contains(line, "@@") {
-				if dlm, err := getDiffLineMapping(line); err == nil {
-					fdm.diffLines = append(fdm.diffLines, dlm)
-				} else {
-					return err
-				}
-			}
+		if fdm, err := getFileDiffMetadata(file, diff); err == nil {
+			prPatchOptions.prFilesDiff = append(prPatchOptions.prFilesDiff, fdm)
+		} else {
+			return err
 		}
-		prPatchOptions.prFilesDiff = append(prPatchOptions.prFilesDiff, fdm)
+
+		// Generating file diff between the headTipCommit and lastMergeCommit
+		diff, err = loadFromGit("diff", "-U0", prPatchOptions.headTipCommit, prPatchOptions.lastMergeCommit, "--", file)
+		if err != nil {
+			return err
+		}
+
+		if fdm, err := getFileDiffMetadata(file, diff); err == nil {
+			prPatchOptions.prFilesDiffLastMerge = append(prPatchOptions.prFilesDiffLastMerge, fdm)
+		} else {
+			return err
+		}
 	}
 	return nil
 }
