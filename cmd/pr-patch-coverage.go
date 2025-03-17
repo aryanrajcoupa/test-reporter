@@ -220,7 +220,7 @@ func (p PrPatchGenerator) generatePatchReport(fromReport formatters.Report) (for
 	patchReport := formatters.Report{
 		SourceFiles: formatters.SourceFiles{},
 	}
-	ignoredLine := formatters.NullInt{-1, false}
+	ignoredLine := formatters.NullInt{Int: -1, Valid: false}
 
 	// Iterate over the source files in the report
 	for _, sourceFile := range fromReport.SourceFiles {
@@ -266,7 +266,7 @@ func (p PrPatchGenerator) generatePatchReport(fromReport formatters.Report) (for
 
 		// Setting
 		success := true
-		for i, _ := range fileContentLines {
+		for i := range fileContentLines {
 			lineNo := i + 1
 			if prFileDiff.withinAddedPatch(lineNo) {
 				fmt.Printf("[Patch check] fileName: %s, lineNo: %d\n", fileName, lineNo)
