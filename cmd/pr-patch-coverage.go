@@ -17,33 +17,33 @@ import (
 const defaultPrPatchCoveragePath = "coverage/patch_coverage.json"
 
 type diffLineMapping struct {
-	beforeLineA int
-	beforeLineB int
-	afterLineA  int
-	afterLineB  int
+	deletedStart int
+	deletedEnd   int
+	addedStart   int
+	addedEnd     int
 }
 
 func (dlm diffLineMapping) String() string {
 	var removedString, addedString string
-	if dlm.beforeLineA == dlm.beforeLineB {
-		removedString = fmt.Sprintf("-%d,0", dlm.beforeLineA)
+	if dlm.deletedStart == dlm.deletedEnd {
+		removedString = fmt.Sprintf("-%d,0", dlm.deletedStart)
 	} else {
-		count := dlm.beforeLineB - dlm.beforeLineA
+		count := dlm.deletedEnd - dlm.deletedStart
 		if count == 1 {
-			removedString = fmt.Sprintf("-%d", dlm.beforeLineA+1)
+			removedString = fmt.Sprintf("-%d", dlm.deletedStart+1)
 		} else {
-			removedString = fmt.Sprintf("-%d,%d", dlm.beforeLineA+1, count)
+			removedString = fmt.Sprintf("-%d,%d", dlm.deletedStart+1, count)
 		}
 	}
 
-	if dlm.afterLineA == dlm.afterLineB {
-		addedString = fmt.Sprintf("+%d,0", dlm.afterLineA)
+	if dlm.addedStart == dlm.addedEnd {
+		addedString = fmt.Sprintf("+%d,0", dlm.addedStart)
 	} else {
-		count := dlm.afterLineB - dlm.afterLineA
+		count := dlm.addedEnd - dlm.addedStart
 		if count == 1 {
-			addedString = fmt.Sprintf("-%d", dlm.afterLineA+1)
+			addedString = fmt.Sprintf("-%d", dlm.addedStart+1)
 		} else {
-			addedString = fmt.Sprintf("+%d,%d", dlm.afterLineA+1, count)
+			addedString = fmt.Sprintf("+%d,%d", dlm.addedStart+1, count)
 		}
 	}
 
@@ -77,27 +77,27 @@ func getDiffLineMapping(fromString string) (diffLineMapping, error) {
 		println(fmt.Sprintf("Line before: %d, Count before: %d, Line after: %d, Count after: %d",
 			result["lineBefore"], result["countBefore"], result["lineAfter"], result["countAfter"]))
 
-		var beforeLineA int
+		var deletedStart int
 		if result["countBefore"] == 0 {
-			beforeLineA = result["lineBefore"]
+			deletedStart = result["lineBefore"]
 		} else {
-			beforeLineA = result["lineBefore"] - 1
+			deletedStart = result["lineBefore"] - 1
 		}
-		beforeLineB := beforeLineA + result["countBefore"] + 1
+		deletedEnd := deletedStart + result["countBefore"] + 1
 
-		var afterLineA int
+		var addedStart int
 		if result["countAfter"] == 0 {
-			afterLineA = result["lineAfter"]
+			addedStart = result["lineAfter"]
 		} else {
-			afterLineA = result["lineAfter"] - 1
+			addedStart = result["lineAfter"] - 1
 		}
-		afterLineB := afterLineA + result["countAfter"] + 1
+		addedEnd := addedStart + result["countAfter"] + 1
 
 		dlm = diffLineMapping{
-			beforeLineA: beforeLineA,
-			beforeLineB: beforeLineB,
-			afterLineA:  afterLineA,
-			afterLineB:  afterLineB,
+			deletedStart: deletedStart,
+			deletedEnd:   deletedEnd,
+			addedStart:   addedStart,
+			addedEnd:     addedEnd,
 		}
 	} else {
 		err := errors.Errorf("Unable to get the line numbers for line: '%s'", fromString)
@@ -122,7 +122,7 @@ func (fdm fileDiffMetadata) String() string {
 	return out.String()
 }
 
-func (fdm fileDiffMetadata) getLineAfterForLineBefore(lineNo int) (int, error) {
+func (fdm fileDiffMetadata) getAddedLineFor(deletedLine int) (int, error) {
 	// The diffLineMapping is the 1 less than the lower_bound of condition lineNo < diffLine.lineBefore
 	// Eg. for following conditions,
 	// 	 lineNo = 86
@@ -133,34 +133,34 @@ func (fdm fileDiffMetadata) getLineAfterForLineBefore(lineNo int) (int, error) {
 	//
 	var validDiffLine diffLineMapping
 	for _, dlm := range fdm.diffLines {
-		if lineNo > dlm.beforeLineA && lineNo < dlm.beforeLineB {
-			return -1, errors.Errorf("lineNo: %d cannot be mapped correctly as it is modified", lineNo)
+		if deletedLine > dlm.deletedStart && deletedLine < dlm.deletedEnd {
+			return -1, errors.Errorf("lineNo: %d cannot be mapped correctly as it is modified", deletedLine)
 		}
-		if lineNo >= dlm.beforeLineB {
+		if deletedLine >= dlm.deletedEnd {
 			validDiffLine = dlm
 		}
 	}
 
 	if validDiffLine == (diffLineMapping{}) {
-		return lineNo, nil
+		return deletedLine, nil
 	}
 
-	mappedLineNo := validDiffLine.afterLineB + (lineNo - validDiffLine.beforeLineB)
+	mappedLineNo := validDiffLine.addedEnd + (deletedLine - validDiffLine.deletedEnd)
 	return mappedLineNo, nil
 }
 
-func (fdm fileDiffMetadata) withinBeforePatch(beforeLineNo int) bool {
+func (fdm fileDiffMetadata) withinDeletedPatch(deletedLine int) bool {
 	for _, dlm := range fdm.diffLines {
-		if beforeLineNo > dlm.beforeLineA && beforeLineNo < dlm.beforeLineB {
+		if deletedLine > dlm.deletedStart && deletedLine < dlm.deletedEnd {
 			return true
 		}
 	}
 	return false
 }
 
-func (fdm fileDiffMetadata) withinAfterPatch(afterLineNo int) bool {
+func (fdm fileDiffMetadata) withinAddedPatch(addedLine int) bool {
 	for _, dlm := range fdm.diffLines {
-		if afterLineNo > dlm.afterLineA && afterLineNo < dlm.afterLineB {
+		if addedLine > dlm.addedStart && addedLine < dlm.addedEnd {
 			return true
 		}
 	}
@@ -268,9 +268,9 @@ func (p PrPatchGenerator) generatePatchReport(fromReport formatters.Report) (for
 		success := true
 		for i, _ := range fileContentLines {
 			lineNo := i + 1
-			if prFileDiff.withinAfterPatch(lineNo) {
+			if prFileDiff.withinAddedPatch(lineNo) {
 				fmt.Printf("[Patch check] fileName: %s, lineNo: %d\n", fileName, lineNo)
-				afterLineNo, err := prFileDiffLastMerge.getLineAfterForLineBefore(lineNo)
+				afterLineNo, err := prFileDiffLastMerge.getAddedLineFor(lineNo)
 				if err != nil {
 					success = false
 					break
