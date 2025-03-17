@@ -23,6 +23,33 @@ type diffLineMapping struct {
 	afterLineB  int
 }
 
+func (dlm diffLineMapping) String() string {
+	var removedString, addedString string
+	if dlm.beforeLineA == dlm.beforeLineB {
+		removedString = fmt.Sprintf("-%d,0", dlm.beforeLineA)
+	} else {
+		count := dlm.beforeLineB - dlm.beforeLineA
+		if count == 1 {
+			removedString = fmt.Sprintf("-%d", dlm.beforeLineA+1)
+		} else {
+			removedString = fmt.Sprintf("-%d,%d", dlm.beforeLineA+1, count)
+		}
+	}
+
+	if dlm.afterLineA == dlm.afterLineB {
+		addedString = fmt.Sprintf("+%d,0", dlm.afterLineA)
+	} else {
+		count := dlm.afterLineB - dlm.afterLineA
+		if count == 1 {
+			addedString = fmt.Sprintf("-%d", dlm.afterLineA+1)
+		} else {
+			addedString = fmt.Sprintf("+%d,%d", dlm.afterLineA+1, count)
+		}
+	}
+
+	return fmt.Sprintf("@@ %s %s @@", removedString, addedString)
+}
+
 func getDiffLineMapping(fromString string) (diffLineMapping, error) {
 	lineNumberRegex := regexp.MustCompile(`@@ -(?P<lineBefore>\d+),?(?P<countBefore>\d+)? \+(?P<lineAfter>\d+),?(?P<countAfter>\d+)? @@`)
 	var dlm diffLineMapping
@@ -64,7 +91,7 @@ func getDiffLineMapping(fromString string) (diffLineMapping, error) {
 		} else {
 			afterLineA = result["lineAfter"] - 1
 		}
-		afterLineB := beforeLineA + result["countAfter"] + 1
+		afterLineB := afterLineA + result["countAfter"] + 1
 
 		dlm = diffLineMapping{
 			beforeLineA: beforeLineA,
@@ -82,6 +109,17 @@ func getDiffLineMapping(fromString string) (diffLineMapping, error) {
 type fileDiffMetadata struct {
 	fileName  string
 	diffLines []diffLineMapping
+}
+
+func (fdm fileDiffMetadata) String() string {
+	out := &strings.Builder{}
+	out.WriteString("fileName: ")
+	out.WriteString(fdm.fileName)
+	out.WriteString("\n")
+	for i, diffLine := range fdm.diffLines {
+		out.WriteString(fmt.Sprintf("diffLines[%d]: %s\n", i, diffLine.String()))
+	}
+	return out.String()
 }
 
 func (fdm fileDiffMetadata) getLineAfterForLineBefore(lineNo int) (int, error) {
@@ -109,6 +147,24 @@ func (fdm fileDiffMetadata) getLineAfterForLineBefore(lineNo int) (int, error) {
 
 	mappedLineNo := validDiffLine.afterLineB + (lineNo - validDiffLine.beforeLineB)
 	return mappedLineNo, nil
+}
+
+func (fdm fileDiffMetadata) withinBeforePatch(beforeLineNo int) bool {
+	for _, dlm := range fdm.diffLines {
+		if beforeLineNo > dlm.beforeLineA && beforeLineNo < dlm.beforeLineB {
+			return true
+		}
+	}
+	return false
+}
+
+func (fdm fileDiffMetadata) withinAfterPatch(afterLineNo int) bool {
+	for _, dlm := range fdm.diffLines {
+		if afterLineNo > dlm.afterLineA && afterLineNo < dlm.afterLineB {
+			return true
+		}
+	}
+	return false
 }
 
 func getFileDiffMetadata(file string, fromDiffString string) (fileDiffMetadata, error) {
@@ -159,12 +215,88 @@ func (p PrPatchGenerator) String() string {
 	return out.String()
 }
 
+func (p PrPatchGenerator) generatePatchReport(fromReport formatters.Report) (formatters.Report, error) {
+	// Create a new report to store the patch coverage
+	patchReport := formatters.Report{
+		SourceFiles: formatters.SourceFiles{},
+	}
+	ignoredLine := formatters.NullInt{-1, false}
+
+	// Iterate over the source files in the report
+	for _, sourceFile := range fromReport.SourceFiles {
+		// Get the file name
+		fileName := sourceFile.Name
+
+		// Get the file diff metadata
+		var prFileDiff fileDiffMetadata
+		for _, f := range p.prFilesDiff {
+			if f.fileName == fileName {
+				prFileDiff = f
+				break
+			}
+		}
+
+		// If the file is not in the PR, skip it
+		if prFileDiff.fileName == "" {
+			continue
+		}
+
+		var prFileDiffLastMerge fileDiffMetadata
+		for _, f := range p.prFilesDiffLastMerge {
+			if f.fileName == fileName {
+				prFileDiffLastMerge = f
+				break
+			}
+		}
+
+		// Getting file from git revision
+		fileContent, err := loadFromGitRaw("show", fmt.Sprintf("%s:%s", p.headTipCommit, fileName))
+		if err != nil {
+			return patchReport, errors.WithStack(err)
+		}
+		fileContentLines := strings.Split(fileContent, "\n")
+
+		// Create a new source file to store the patch coverage
+		patchSourceFile := formatters.SourceFile{
+			Name:     fileName,
+			Coverage: make([]formatters.NullInt, len(fileContentLines)),
+		}
+
+		println(prFileDiff.String())
+
+		// Setting
+		success := true
+		for i, _ := range fileContentLines {
+			lineNo := i + 1
+			if prFileDiff.withinAfterPatch(lineNo) {
+				fmt.Printf("[Patch check] fileName: %s, lineNo: %d\n", fileName, lineNo)
+				afterLineNo, err := prFileDiffLastMerge.getLineAfterForLineBefore(lineNo)
+				if err != nil {
+					success = false
+					break
+				}
+				patchSourceFile.Coverage[i] = fromReport.SourceFiles[fileName].Coverage[afterLineNo-1]
+			} else {
+				patchSourceFile.Coverage[i] = ignoredLine
+			}
+		}
+
+		// Add the source file to the patch report
+		if success {
+			patchReport.SourceFiles[fileName] = patchSourceFile
+		}
+	}
+
+	return patchReport, nil
+}
+
 var prPatchOptions = PrPatchGenerator{}
 
 func getFileMappingFromDiff() error {
 	for _, file := range prPatchOptions.prFiles {
 		println("File: " + file)
 		// Generating file diff between the mergeBaseCommit and headTipCommit
+		println("diff between the mergeBaseCommit and headTipCommit :-")
 		diff, err := loadFromGit("diff", "-U0", prPatchOptions.mergeBaseCommit, prPatchOptions.headTipCommit, "--", file)
 		if err != nil {
 			return err
@@ -177,6 +309,7 @@ func getFileMappingFromDiff() error {
 		}
 
 		// Generating file diff between the headTipCommit and lastMergeCommit
+		println("diff between the headTipCommit and lastMergeCommit :-")
 		diff, err = loadFromGit("diff", "-U0", prPatchOptions.headTipCommit, prPatchOptions.lastMergeCommit, "--", file)
 		if err != nil {
 			return err
@@ -260,8 +393,9 @@ var prPatchCoverageCmd = &cobra.Command{
 			return errors.WithStack(err)
 		}
 
-		outRep := formatters.Report{
-			SourceFiles: formatters.SourceFiles{},
+		outRep, err := prPatchOptions.generatePatchReport(rep)
+		if err != nil {
+			return errors.WithStack(err)
 		}
 
 		out, err := writer(prPatchOptions.output)
@@ -279,6 +413,15 @@ var prPatchCoverageCmd = &cobra.Command{
 }
 
 func loadFromGit(gitArgs ...string) (string, error) {
+	strResponse, err := loadFromGitRaw(gitArgs...)
+	if err != nil {
+		return "", errors.WithStack(err)
+	}
+
+	return strings.TrimSpace(strResponse), nil
+}
+
+func loadFromGitRaw(gitArgs ...string) (string, error) {
 	cmd := exec.Command("git", gitArgs...)
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
@@ -286,7 +429,7 @@ func loadFromGit(gitArgs ...string) (string, error) {
 		return "", errors.WithStack(err)
 	}
 
-	return strings.TrimSpace(string(out)), nil
+	return string(out), nil
 }
 
 func init() {
