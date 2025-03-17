@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/codeclimate/test-reporter/env"
 	"github.com/codeclimate/test-reporter/formatters"
 	"github.com/pkg/errors"
@@ -57,7 +58,7 @@ func getDiffLineMapping(fromString string) (diffLineMapping, error) {
 	if len(matches) >= 4 {
 		// Get names of the capturing groups
 		names := lineNumberRegex.SubexpNames()
-		println(fmt.Sprintf("Matches: %v, Names: %v", matches, names))
+		logrus.Debugf("Matches: %v, Names: %v", matches, names)
 		// Create a map of group names to their values
 		result := make(map[string]int)
 		for i, name := range names {
@@ -74,8 +75,8 @@ func getDiffLineMapping(fromString string) (diffLineMapping, error) {
 			}
 		}
 
-		println(fmt.Sprintf("Line before: %d, Count before: %d, Line after: %d, Count after: %d",
-			result["lineBefore"], result["countBefore"], result["lineAfter"], result["countAfter"]))
+		logrus.Debugf("Line before: %d, Count before: %d, Line after: %d, Count after: %d",
+			result["lineBefore"], result["countBefore"], result["lineAfter"], result["countAfter"])
 
 		var deletedStart int
 		if result["countBefore"] == 0 {
@@ -262,14 +263,14 @@ func (p PrPatchGenerator) generatePatchReport(fromReport formatters.Report) (for
 			Coverage: make([]formatters.NullInt, len(fileContentLines)),
 		}
 
-		println(prFileDiff.String())
+		logrus.Debug(prFileDiff.String())
 
 		// Setting
 		success := true
 		for i := range fileContentLines {
 			lineNo := i + 1
 			if prFileDiff.withinAddedPatch(lineNo) {
-				fmt.Printf("[Patch check] fileName: %s, lineNo: %d\n", fileName, lineNo)
+				logrus.Debugf("[Patch check] fileName: %s, lineNo: %d\n", fileName, lineNo)
 				afterLineNo, err := prFileDiffLastMerge.getAddedLineFor(lineNo)
 				if err != nil {
 					success = false
@@ -294,9 +295,9 @@ var prPatchOptions = PrPatchGenerator{}
 
 func getFileMappingFromDiff() error {
 	for _, file := range prPatchOptions.prFiles {
-		println("File: " + file)
+		logrus.Debug("File: " + file)
 		// Generating file diff between the mergeBaseCommit and headTipCommit
-		println("diff between the mergeBaseCommit and headTipCommit :-")
+		logrus.Debug("diff between the mergeBaseCommit and headTipCommit :-")
 		diff, err := loadFromGit("diff", "-U0", prPatchOptions.mergeBaseCommit, prPatchOptions.headTipCommit, "--", file)
 		if err != nil {
 			return err
@@ -309,7 +310,7 @@ func getFileMappingFromDiff() error {
 		}
 
 		// Generating file diff between the headTipCommit and lastMergeCommit
-		println("diff between the headTipCommit and lastMergeCommit :-")
+		logrus.Debug("diff between the headTipCommit and lastMergeCommit :-")
 		diff, err = loadFromGit("diff", "-U0", prPatchOptions.headTipCommit, prPatchOptions.lastMergeCommit, "--", file)
 		if err != nil {
 			return err
@@ -362,7 +363,7 @@ func updatePrPatchOptions() error {
 		return err
 	}
 	prPatchOptions.prFiles = strings.Split(files, "\n")
-	println(prPatchOptions.String())
+	logrus.Debug(prPatchOptions.String())
 
 	if err := getFileMappingFromDiff(); err != nil {
 		return err
