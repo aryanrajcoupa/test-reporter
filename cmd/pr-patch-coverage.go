@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultPrPatchCoveragePath = "coverage/patch_coverage.json"
+const defaultPrPatchCoveragePath = "coverage/artifact-pr-patch-coverage-results.json"
 
 type diffLineMapping struct {
 	deletedStart int
