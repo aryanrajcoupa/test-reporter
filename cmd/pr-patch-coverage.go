@@ -350,12 +350,13 @@ func updatePrPatchOptions() error {
 		}
 		prPatchOptions.lastMergeCommit = commit
 	}
-	// Get the merge base commit
-	commit, err := loadFromGit("merge-base", prPatchOptions.baseBranch, prPatchOptions.headTipCommit)
-	if err != nil {
-		return err
+	if prPatchOptions.mergeBaseCommit == "" {
+		commit, err := loadFromGit("merge-base", prPatchOptions.baseBranch, prPatchOptions.headTipCommit)
+		if err != nil {
+			return err
+		}
+		prPatchOptions.mergeBaseCommit = commit
 	}
-	prPatchOptions.mergeBaseCommit = commit
 
 	// Get the list of files changed in the PR
 	files, err := loadFromGit("diff", "--name-only", prPatchOptions.mergeBaseCommit, prPatchOptions.headTipCommit)
@@ -438,6 +439,7 @@ func init() {
 	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.headBranch, "head-branch", "", "the head branch of the PR")
 	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.headTipCommit, "head-tip-commit", "", "commit on tip of PR head branch")
 	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.lastMergeCommit, "last-merge-commit", "", "last merge commit on the head branch")
+	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.mergeBaseCommit, "merge-base-commit", "", "merge-base commit between base and head branch")
 	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.output, "output", defaultPrPatchCoveragePath, "output path")
 	RootCmd.AddCommand(prPatchCoverageCmd)
 }
