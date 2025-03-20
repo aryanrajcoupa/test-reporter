@@ -326,8 +326,8 @@ func getFileMappingFromDiff() error {
 }
 
 func updatePrPatchOptions() error {
-	if prPatchOptions.baseBranch == "" {
-		return errors.New("base-branch is required")
+	if prPatchOptions.baseBranch == "" && prPatchOptions.mergeBaseCommit == "" {
+		return errors.New("base-branch is required when --merge-base-commit is not set")
 	}
 	if prPatchOptions.headBranch == "" {
 		e, err := env.New()
@@ -435,7 +435,7 @@ func loadFromGitRaw(gitArgs ...string) (string, error) {
 }
 
 func init() {
-	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.baseBranch, "base-branch", "", "the base branch of the PR")
+	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.baseBranch, "base-branch", "", "the base branch of the PR (Required when --merge-base-commit is not set)")
 	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.headBranch, "head-branch", "", "the head branch of the PR")
 	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.headTipCommit, "head-tip-commit", "", "commit on tip of PR head branch")
 	prPatchCoverageCmd.Flags().StringVar(&prPatchOptions.lastMergeCommit, "last-merge-commit", "", "last merge commit on the head branch")
